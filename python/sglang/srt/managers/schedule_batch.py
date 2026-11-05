@@ -1904,6 +1904,21 @@ def _compute_chunked_req_next_prompt_token(
     return None
 
 
+def prefill_checkpoint_boundary(
+    prefix_len: int, extend_len: int, checkpoint_grid: int
+) -> Optional[int]:
+    """The depth a prefill extend of ``extend_len`` tokens after ``prefix_len``
+    tracks its state checkpoint at, without DCP: the last whole multiple of
+    ``checkpoint_grid`` into the extend, counted from its prefix. None for an
+    extend shorter than the grid, which tracks none: the cache then takes no
+    newer checkpoint, and a prefix-sharing cache retires no window row behind
+    one (`mamba_prefill_chunk_grid` keeps every cut on the grid where that
+    matters)."""
+    if extend_len < checkpoint_grid:
+        return None
+    return prefix_len + extend_len // checkpoint_grid * checkpoint_grid
+
+
 @dataclasses.dataclass
 class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
     """Store all information of a batch on the scheduler."""
@@ -2638,10 +2653,11 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             # Chunked prefill can leave an active request off the absolute
             # checkpoint grid. Without DCP, keep tracking snapshots relative to
             # that request prefix so later chunks can continue donating states.
-            mask = req.extend_len >= checkpoint_grid
-            mamba_track_seqlen_aligned = (
-                prefix_len + (req.extend_len // checkpoint_grid) * checkpoint_grid
+            boundary = prefill_checkpoint_boundary(
+                prefix_len, req.extend_len, checkpoint_grid
             )
+            mask = boundary is not None
+            mamba_track_seqlen_aligned = prefix_len if boundary is None else boundary
         track_position = req.kv.mamba_next_track_idx
         mamba_track_seqlen = -1
         if mask:
