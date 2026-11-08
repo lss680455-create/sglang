@@ -2044,6 +2044,11 @@ class DecodePreallocQueue(DecodeHiCachePreallocMixin):
         if StateType.DSV4_REQUEST_STATE in state_types and isinstance(
             self.token_to_kv_pool, DeepSeekV4TokenToKVPool
         ):
+            # FIXME: this resets the row's C128 ring and pending-pair state on
+            # the schedule stream, while the forward of the row's previous
+            # request may still read or write them (the write-after-read
+            # barrier orders only shared reads). Order the reset after that
+            # forward and before the transfer writes the row.
             self.token_to_kv_pool.clear_request_scoped_state(
                 int(decode_req.req.kv.req_pool_idx)
             )
